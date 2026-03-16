@@ -3,6 +3,7 @@
 
 import argparse
 import contextlib
+from datetime import datetime
 import json
 import os
 import statistics
@@ -78,6 +79,16 @@ def parse_args():
         help="full transcribe 时使用 without_timestamps=True",
     )
     p.add_argument("--json-out", default=None, help="导出 benchmark JSON 路径")
+    p.add_argument(
+        "--json-auto",
+        action="store_true",
+        help="自动生成 JSON 文件名（包含模型、后端、ISA、时间戳等信息）",
+    )
+    p.add_argument(
+        "--json-dir",
+        default=".",
+        help="--json-auto 时 JSON 文件输出目录（默认当前目录）",
+    )
 
     # profiler 控制
     p.add_argument(
@@ -530,11 +541,47 @@ def main():
             _, table = run_profile_once("full_transcribe", run_full)
             results["bench"]["full_transcribe"]["profiler_table"] = table
 
+    # 确定 JSON 输出路径
+    json_path = None
     if args.json_out:
-        out_path = Path(args.json_out)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"\nJSON saved to: {out_path}")
+        json_path = Path(args.json_out)
+    elif args.json_auto:
+        # 自动生成文件名：whisper_bench_{model}_{backend}_{isa}_{timestamp}.json
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        audio_name = Path(args.audio).stem
+
+        # 构建文件名组件
+        parts = [
+            "whisper_bench",
+            f"model_{args.model}",
+            f"backend_{args.backend}",
+        ]
+
+        # 添加 ISA 信息
+        if args.backend == "native" and args.native_isa != "auto":
+            parts.append(f"isa_{args.native_isa}")
+        elif args.backend == "mkldnn" and args.onednn_isa != "auto":
+            parts.append(f"isa_{args.onednn_isa}")
+
+        # 添加线程信息
+        if args.threads is not None:
+            parts.append(f"t{args.threads}")
+
+        # 添加音频名和时间戳
+        parts.append(f"audio_{audio_name}")
+        parts.append(timestamp)
+
+        filename = "_".join(parts) + ".json"
+        json_path = Path(args.json_dir) / filename
+
+    # 写入 JSON
+    if json_path:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(
+            json.dumps(results, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+        print(f"\nJSON saved to: {json_path}")
 
 
 if __name__ == "__main__":
