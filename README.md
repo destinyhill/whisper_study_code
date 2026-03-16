@@ -67,7 +67,7 @@ python whisper_cpu_bench_allinone.py \
   --json-dir ./results
 
 # 输出示例：
-# ./results/whisper_bench_model_small_backend_mkldnn_isa_avx512_core_vnni_t8_audio_chinese_sample_20260316_143052.json
+# ./results/whisper_bench_model_small_backend_mkldnn_onednn_avx512_core_vnni_t8_audio_chinese_sample_20260316_143052.json
 ```
 
 ## 参数详解
@@ -157,7 +157,7 @@ python whisper_cpu_bench_allinone.py \
   --native-isa avx2 \
   --json-auto \
   --json-dir ./results
-# 输出：./results/whisper_bench_model_small_backend_native_isa_avx2_audio_test_20260316_143052.json
+# 输出：./results/whisper_bench_model_small_backend_native_native_avx2_audio_test_20260316_143052.json
 
 # MKLDNN/oneDNN（AVX512 VNNI）- 自动生成文件名
 python whisper_cpu_bench_allinone.py \
@@ -167,7 +167,7 @@ python whisper_cpu_bench_allinone.py \
   --onednn-isa avx512_core_vnni \
   --json-auto \
   --json-dir ./results
-# 输出：./results/whisper_bench_model_small_backend_mkldnn_isa_avx512_core_vnni_audio_test_20260316_143053.json
+# 输出：./results/whisper_bench_model_small_backend_mkldnn_onednn_avx512_core_vnni_audio_test_20260316_143053.json
 ```
 
 ### 示例 3：线程数调优（批量测试）
@@ -351,12 +351,24 @@ python whisper_cpu_bench_allinone.py \
 
 **自动生成的文件名格式：**
 ```
-whisper_bench_model_{模型}_backend_{后端}_[isa_{指令集}]_[t{线程数}]_audio_{音频名}_{时间戳}.json
+whisper_bench_model_{模型}_backend_{后端}_[native_{native_isa}]_[onednn_{onednn_isa}]_[t{线程数}]_audio_{音频名}_{时间戳}.json
 ```
 
+**说明：**
+- `native_{native_isa}` - 仅当设置 `--native-isa` 时出现
+- `onednn_{onednn_isa}` - 仅当设置 `--onednn-isa` 时出现
+- 两个 ISA 可以同时设置，会同时出现在文件名中
+
 **示例：**
-```
-whisper_bench_model_small_backend_mkldnn_isa_avx512_core_vnni_t8_audio_test_20260316_143052.json
+```bash
+# 仅设置 oneDNN ISA
+whisper_bench_model_small_backend_mkldnn_onednn_avx512_core_vnni_t8_audio_test_20260316_143052.json
+
+# 仅设置 native ISA
+whisper_bench_model_small_backend_native_native_avx2_t8_audio_test_20260316_143052.json
+
+# 同时设置两个 ISA（高级用法）
+whisper_bench_model_small_backend_mkldnn_native_avx2_onednn_avx512_core_vnni_t8_audio_test_20260316_143052.json
 ```
 
 **优势：**
