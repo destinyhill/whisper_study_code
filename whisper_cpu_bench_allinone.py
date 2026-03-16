@@ -26,8 +26,8 @@ def parse_args():
     p.add_argument(
         "--backend",
         default="native",
-        choices=["native", "mkldnn", "mixed"],
-        help="native=关闭mkldnn走原生路径；mkldnn=开启mkldnn；mixed=开启mkldnn并接受混合路径",
+        choices=["native", "mkldnn"],
+        help="native=关闭mkldnn走原生路径；mkldnn=开启mkldnn",
     )
 
     # 原生 PyTorch CPU ISA
@@ -44,10 +44,7 @@ def parse_args():
         default="auto",
         choices=[
             "auto",
-            "sse41",
-            "avx",
             "avx2",
-            "avx2_vnni",
             "avx512_core",
             "avx512_core_vnni",
             "avx512_core_bf16",
@@ -142,20 +139,25 @@ from whisper.tokenizer import get_tokenizer  # noqa: E402
 def setup_runtime():
     if args.backend == "native":
         torch.backends.mkldnn.enabled = False
-    elif args.backend in ("mkldnn", "mixed"):
+    elif args.backend == "mkldnn":
         torch.backends.mkldnn.enabled = True
+
+    if args.backend == "native" and args.onednn_isa != "auto":
+        print("note                  : onednn isa is set but mkldnn backend is disabled in this run")
 
     torch.set_grad_enabled(False)
 
     if args.threads is not None:
         torch.set_num_threads(args.threads)
 
+    interop_set_status = "unused"
     if args.interop_threads is not None:
         try:
             torch.set_num_interop_threads(args.interop_threads)
+            interop_set_status = "ok"
         except RuntimeError:
-            # 某些构建里只能在最早阶段设置一次
-            pass
+            interop_set_status = "failed(already initialized)"
+    print(f"interop set status     : {interop_set_status}")        
 
 
 def maybe_mkldnn_verbose():
