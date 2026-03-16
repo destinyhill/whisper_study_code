@@ -1,0 +1,94 @@
+{
+  "env": {
+    "audio": "zh_long.wav",
+    "audio_duration_sec": 54.9649375,
+    "model": "small",
+    "language": "zh",
+    "task": "transcribe",
+    "backend_requested": "mkldnn",
+    "native_isa_requested": "avx2",
+    "env_ATEN_CPU_CAPABILITY": "avx2",
+    "mkldnn_available": true,
+    "mkldnn_enabled": true,
+    "onednn_isa_requested": "avx512_core",
+    "env_ONEDNN_MAX_CPU_ISA": "AVX512_CORE",
+    "env_DNNL_MAX_CPU_ISA": "AVX512_CORE",
+    "cpu_capability": "AVX2",
+    "torch_num_threads": 8,
+    "torch_num_interop_threads": 128,
+    "warmup": 5,
+    "repeat": 10,
+    "decoder_tokens": 16,
+    "profile_sections": [],
+    "profile_sort_by": "self_cpu_time_total",
+    "interop_set_status": "unused"
+  },
+  "bench": {
+    "encoder_30s_chunk": {
+      "times_sec": [
+        0.5776180350221694,
+        0.5696858931332827,
+        0.5702764820307493,
+        0.46158342994749546,
+        0.358550715027377,
+        0.5319904470816255,
+        0.5631589100230485,
+        0.5604535860475153,
+        0.5628189558628947,
+        0.5909640868194401
+      ],
+      "output_shape": [
+        1,
+        1500,
+        768
+      ],
+      "chunk_sec": 30.0,
+      "rtf_mean": 0.017823668469985326,
+      "rtf_median": 0.01876629776476572
+    },
+    "decoder_step": {
+      "times_sec": [
+        0.047134880907833576,
+        0.04723489400930703,
+        0.051247309893369675,
+        0.04726315010339022,
+        0.06231710594147444,
+        0.058256729040294886,
+        0.07526916987262666,
+        0.07506174314767122,
+        0.07547062006779015,
+        0.07516213785856962
+      ],
+      "prefix_len": 16,
+      "logits_shape": [
+        1,
+        16,
+        51865
+      ],
+      "steps_per_sec_mean": 16.275571708412322,
+      "next_token": [
+        34859
+      ]
+    },
+    "full_transcribe": {
+      "times_sec": [
+        3.1658084669616073,
+        3.1606168469879776,
+        3.155426210956648,
+        3.1619705019984394,
+        3.154351944802329,
+        3.15662501915358,
+        3.1502287189941853,
+        3.1849756711162627,
+        3.145455788820982,
+        3.4895642220508307
+      ],
+      "audio_duration_sec": 54.9649375,
+      "rtf_mean": 0.05808252468556495,
+      "rtf_median": 0.05746610615305037,
+      "text_preview": "我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我认为跑步最重要的就是给我带来了身体健康我認為跑步最重要的就是給我帶來了身體健康",
+      "text_len": 220,
+      "num_segments": 11
+    }
+  }
+}
