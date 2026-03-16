@@ -129,6 +129,13 @@ if args.threads is not None:
     os.environ["OPENBLAS_NUM_THREADS"] = str(args.threads)
     os.environ["NUMEXPR_NUM_THREADS"] = str(args.threads)
 
+if args.warmup < 0:
+    raise ValueError("warmup must be >= 0")
+if args.repeat <= 0:
+    raise ValueError("repeat must be > 0")
+if args.decoder_tokens <= 0:
+    raise ValueError("decoder-tokens must be > 0")
+
 import torch  # noqa: E402
 import whisper  # noqa: E402
 from torch.profiler import profile, ProfilerActivity, record_function  # noqa: E402
@@ -157,7 +164,8 @@ def setup_runtime():
             interop_set_status = "ok"
         except RuntimeError:
             interop_set_status = "failed(already initialized)"
-    print(f"interop set status     : {interop_set_status}")        
+    print(f"interop set status     : {interop_set_status}")
+    return interop_set_status
 
 
 def maybe_mkldnn_verbose():
@@ -322,11 +330,31 @@ def build_decoder_prefix(tokenizer, length: int):
 
 
 def main():
-    setup_runtime()
+    interop_set_status = setup_runtime()
 
     sections = {x.strip() for x in args.sections.split(",") if x.strip()}
     profile_sections = {x.strip() for x in args.profile_sections.split(",") if x.strip()}
+    valid_sections = {"encoder", "decoder", "full"}
+    invalid_sections = sections - valid_sections
+    if invalid_sections:
+        raise ValueError(f"invalid sections: {sorted(invalid_sections)}")
+
+    invalid_profile_sections = profile_sections - valid_sections
+    if invalid_profile_sections:
+        raise ValueError(f"invalid profile sections: {sorted(invalid_profile_sections)}")
+
+    if not sections:
+        raise ValueError("at least one section must be selected")
+
+    if not profile_sections.issubset(sections):
+        raise ValueError(
+            f"profile sections must be a subset of sections: {sorted(profile_sections - sections)}"
+        )
     audio_path = Path(args.audio)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    if not audio_path.is_file():
+        raise ValueError(f"Audio path is not a file: {audio_path}")
 
     print("=== Environment ===")
     print(f"audio path            : {audio_path}")
@@ -385,6 +413,7 @@ def main():
             "decoder_tokens": args.decoder_tokens,
             "profile_sections": sorted(profile_sections),
             "profile_sort_by": args.profile_sort_by,
+            "interop_set_status": interop_set_status,
         },
         "bench": {},
     }
@@ -493,6 +522,8 @@ def main():
             "rtf_mean": statistics.mean(full_times) / audio_duration_sec,
             "rtf_median": statistics.median(full_times) / audio_duration_sec,
             "text_preview": text[:500],
+            "text_len": len(text),
+            "num_segments": len(full_out.get("segments", [])),
         }
 
         if "full" in profile_sections:
@@ -501,6 +532,7 @@ def main():
 
     if args.json_out:
         out_path = Path(args.json_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nJSON saved to: {out_path}")
 
