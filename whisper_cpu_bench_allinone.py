@@ -557,11 +557,11 @@ def main():
             f"backend_{args.backend}",
         ]
 
-        # 添加 ISA 信息
-        if args.backend == "native" and args.native_isa != "auto":
-            parts.append(f"isa_{args.native_isa}")
-        elif args.backend == "mkldnn" and args.onednn_isa != "auto":
-            parts.append(f"isa_{args.onednn_isa}")
+        # 添加 ISA 信息（两个都可能被设置）
+        if args.native_isa != "auto":
+            parts.append(f"native_{args.native_isa}")
+        if args.onednn_isa != "auto":
+            parts.append(f"onednn_{args.onednn_isa}")
 
         # 添加线程信息
         if args.threads is not None:
