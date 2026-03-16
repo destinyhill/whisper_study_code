@@ -9,7 +9,8 @@
 - ✅ **分段性能测试**：可单独测试 encoder、decoder 或完整转录流程
 - ✅ **详细性能统计**：均值、中位数、P90/P95、标准差等指标
 - ✅ **PyTorch Profiler 集成**：深入分析性能瓶颈
-- ✅ **结果导出**：JSON 格式保存所有测试数据
+- ✅ **智能结果导出**：自动生成包含配置信息的 JSON 文件名，批量测试更便捷
+- ✅ **批量测试友好**：适合大规模性能对比和自动化测试
 
 ## 环境要求
 
@@ -44,6 +45,9 @@ python whisper_cpu_bench_allinone.py --audio test.wav --model base
 
 # 开启 MKLDNN 加速
 python whisper_cpu_bench_allinone.py --audio test.wav --backend mkldnn
+
+# 保存结果到 JSON（自动生成文件名）
+python whisper_cpu_bench_allinone.py --audio test.wav --json-auto
 ```
 
 ### 完整示例
@@ -59,7 +63,11 @@ python whisper_cpu_bench_allinone.py \
   --threads 8 \
   --warmup 5 \
   --repeat 10 \
-  --json-out results.json
+  --json-auto \
+  --json-dir ./results
+
+# 输出示例：
+# ./results/whisper_bench_model_small_backend_mkldnn_isa_avx512_core_vnni_t8_audio_chinese_sample_20260316_143052.json
 ```
 
 ## 参数详解
@@ -109,7 +117,9 @@ python whisper_cpu_bench_allinone.py \
 | `--repeat` | `5` | 正式计时重复次数 |
 | `--decoder-tokens` | `16` | decoder 测试时的前缀 token 长度 |
 | `--without-timestamps` | `False` | 完整转录时禁用时间戳预测（可能更快） |
-| `--json-out` | `None` | 导出 JSON 结果的文件路径 |
+| `--json-out` | `None` | 手动指定 JSON 结果文件路径 |
+| `--json-auto` | `False` | 🌟 自动生成 JSON 文件名（包含模型、后端、ISA、线程数等信息） |
+| `--json-dir` | `.` | 配合 `--json-auto` 使用，指定输出目录（默认当前目录） |
 
 ### Profiler 控制（性能分析）
 
@@ -136,38 +146,58 @@ python whisper_cpu_bench_allinone.py --audio test.wav --model base
 python whisper_cpu_bench_allinone.py --audio test.wav --model small
 ```
 
-### 示例 2：原生 vs MKLDNN 对比
+### 示例 2：原生 vs MKLDNN 对比（自动生成文件名）
 
 ```bash
-# 原生 PyTorch（AVX2）
+# 原生 PyTorch（AVX2）- 自动生成文件名
 python whisper_cpu_bench_allinone.py \
   --audio test.wav \
   --model small \
   --backend native \
   --native-isa avx2 \
-  --json-out results_native_avx2.json
+  --json-auto \
+  --json-dir ./results
+# 输出：./results/whisper_bench_model_small_backend_native_isa_avx2_audio_test_20260316_143052.json
 
-# MKLDNN/oneDNN（AVX512 VNNI）
+# MKLDNN/oneDNN（AVX512 VNNI）- 自动生成文件名
 python whisper_cpu_bench_allinone.py \
   --audio test.wav \
   --model small \
   --backend mkldnn \
   --onednn-isa avx512_core_vnni \
-  --json-out results_mkldnn_avx512vnni.json
+  --json-auto \
+  --json-dir ./results
+# 输出：./results/whisper_bench_model_small_backend_mkldnn_isa_avx512_core_vnni_audio_test_20260316_143053.json
 ```
 
-### 示例 3：线程数调优
+### 示例 3：线程数调优（批量测试）
 
 ```bash
-# 测试不同线程数性能
+# Linux/macOS - 自动生成文件名包含线程数信息
 for threads in 1 2 4 8 16; do
   python whisper_cpu_bench_allinone.py \
     --audio test.wav \
     --model small \
     --backend mkldnn \
     --threads $threads \
-    --json-out results_threads_${threads}.json
+    --json-auto \
+    --json-dir ./thread_test
 done
+# 输出文件示例：
+# whisper_bench_model_small_backend_mkldnn_t1_audio_test_20260316_143052.json
+# whisper_bench_model_small_backend_mkldnn_t2_audio_test_20260316_143053.json
+# ...
+
+# Windows PowerShell
+foreach ($t in @(1,2,4,8,16)) {
+  python whisper_cpu_bench_allinone.py `
+    --audio test.wav `
+    --model small `
+    --backend mkldnn `
+    --threads $t `
+    --json-auto `
+    --json-dir ./thread_test
+}
 ```
 
 ### 示例 4：仅测试 encoder（最快）
@@ -214,6 +244,59 @@ python whisper_cpu_bench_allinone.py --audio japanese.wav --language ja --model 
 python whisper_cpu_bench_allinone.py --audio spanish.wav --task translate --model base
 ```
 
+### 示例 7：批量测试所有组合（自动化）
+
+```bash
+#!/bin/bash
+# 测试多个模型 + 后端组合，自动生成文件名
+
+AUDIO="test.wav"
+MODELS="tiny base small"
+BACKENDS="native mkldnn"
+OUTPUT_DIR="./benchmark_results"
+
+for model in $MODELS; do
+  for backend in $BACKENDS; do
+    echo "Testing: $model with $backend"
+    python whisper_cpu_bench_allinone.py \
+      --audio $AUDIO \
+      --model $model \
+      --backend $backend \
+      --json-auto \
+      --json-dir $OUTPUT_DIR
+  done
+done
+
+echo "All results saved to: $OUTPUT_DIR"
+echo "Files generated:"
+ls -1 $OUTPUT_DIR
+```
+
+**Windows PowerShell 版本：**
+
+```powershell
+# 批量测试脚本
+$audio = "test.wav"
+$models = @("tiny", "base", "small")
+$backends = @("native", "mkldnn")
+$outputDir = "./benchmark_results"
+
+foreach ($model in $models) {
+    foreach ($backend in $backends) {
+        Write-Host "Testing: $model with $backend"
+        python whisper_cpu_bench_allinone.py `
+            --audio $audio `
+            --model $model `
+            --backend $backend `
+            --json-auto `
+            --json-dir $outputDir
+    }
+}
+
+Write-Host "All results saved to: $outputDir"
+Get-ChildItem $outputDir -Name
+```
+
 ## 输出说明
 
 ### 终端输出
@@ -251,7 +334,40 @@ torch num threads     : 8
 
 ### JSON 输出
 
-使用 `--json-out results.json` 导出完整数据：
+#### 方式 1：自动生成文件名（推荐用于批量测试）
+
+使用 `--json-auto` 自动生成包含配置信息的文件名：
+
+```bash
+python whisper_cpu_bench_allinone.py \
+  --audio test.wav \
+  --model small \
+  --backend mkldnn \
+  --onednn-isa avx512_core_vnni \
+  --threads 8 \
+  --json-auto \
+  --json-dir ./results
+```
+
+**自动生成的文件名格式：**
+```
+whisper_bench_model_{模型}_backend_{后端}_[isa_{指令集}]_[t{线程数}]_audio_{音频名}_{时间戳}.json
+```
+
+**示例：**
+```
+whisper_bench_model_small_backend_mkldnn_isa_avx512_core_vnni_t8_audio_test_20260316_143052.json
+```
+
+**优势：**
+- 📁 **批量测试友好**：无需手动管理文件名
+- 📝 **信息丰富**：文件名包含所有关键配置
+- ⏰ **避免覆盖**：时间戳确保唯一性
+- 🔍 **易于查找**：可按模型/后端/ISA 筛选
+
+#### 方式 2：手动指定文件名
+
+使用 `--json-out results.json` 手动指定文件路径：
 
 ```json
 {
@@ -344,15 +460,20 @@ Whisper 的设计是将音频切分为 30 秒 chunks 分别处理，因此 encod
 
 ## 进阶用法
 
-### 批量测试脚本
+### 批量测试脚本（自动化）
+
+使用 `--json-auto` 简化批量测试，无需手动管理文件名：
 
 ```bash
 #!/bin/bash
-# 测试所有模型 + 后端组合
+# 测试所有模型 + 后端组合，自动生成有意义的文件名
 
 AUDIO="test.wav"
 MODELS="tiny base small"
 BACKENDS="native mkldnn"
+OUTPUT_DIR="./benchmark_results"
+
+mkdir -p $OUTPUT_DIR
 
 for model in $MODELS; do
   for backend in $BACKENDS; do
@@ -361,9 +482,40 @@ for model in $MODELS; do
       --audio $AUDIO \
       --model $model \
       --backend $backend \
-      --json-out results_${model}_${backend}.json
+      --json-auto \
+      --json-dir $OUTPUT_DIR
   done
 done
+
+echo "All results saved to: $OUTPUT_DIR"
+ls -lh $OUTPUT_DIR
+```
+
+**Windows PowerShell 版本：**
+
+```powershell
+# 批量测试脚本
+$audio = "test.wav"
+$models = @("tiny", "base", "small")
+$backends = @("native", "mkldnn")
+$outputDir = "./benchmark_results"
+
+New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+
+foreach ($model in $models) {
+    foreach ($backend in $backends) {
+        Write-Host "Testing: $model with $backend"
+        python whisper_cpu_bench_allinone.py `
+            --audio $audio `
+            --model $model `
+            --backend $backend `
+            --json-auto `
+            --json-dir $outputDir
+    }
+}
+
+Write-Host "All results saved to: $outputDir"
+Get-ChildItem $outputDir | Format-Table Name, Length
 ```
 
 ### 结果分析脚本
@@ -371,23 +523,83 @@ done
 ```python
 import json
 import glob
+from pathlib import Path
 
-# 读取所有结果
+# 读取所有结果（支持自动生成的文件名）
 results = []
-for f in glob.glob("results_*.json"):
-    with open(f) as fp:
-        data = json.load(fp)
-        results.append({
-            "file": f,
-            "model": data["env"]["model"],
-            "backend": data["env"]["backend_requested"],
-            "rtf": data["bench"].get("full_transcribe", {}).get("rtf_median", None)
-        })
+result_dir = "./benchmark_results"
 
-# 排序输出
-results.sort(key=lambda x: x["rtf"] if x["rtf"] else 999)
+for f in Path(result_dir).glob("whisper_bench_*.json"):
+    with open(f, encoding='utf-8') as fp:
+        data = json.load(fp)
+        
+        # 提取关键信息
+        env = data["env"]
+        bench = data["bench"]
+        
+        result = {
+            "file": f.name,
+            "model": env["model"],
+            "backend": env["backend_requested"],
+            "threads": env.get("torch_num_threads", "default"),
+            "rtf_mean": None,
+            "rtf_median": None,
+        }
+        
+        # 尝试获取 full_transcribe 结果
+        if "full_transcribe" in bench:
+            result["rtf_mean"] = bench["full_transcribe"].get("rtf_mean")
+            result["rtf_median"] = bench["full_transcribe"].get("rtf_median")
+        # 否则使用 encoder 结果
+        elif "encoder_30s_chunk" in bench:
+            result["rtf_mean"] = bench["encoder_30s_chunk"].get("rtf_mean")
+            result["rtf_median"] = bench["encoder_30s_chunk"].get("rtf_median")
+        
+        results.append(result)
+
+# 按 RTF 排序（越小越好）
+results.sort(key=lambda x: x["rtf_median"] if x["rtf_median"] else 999)
+
+# 输出结果表格
+print(f"{'Model':<10} {'Backend':<10} {'Threads':<10} {'RTF(median)':<12} {'RTF(mean)':<12}")
+print("-" * 60)
 for r in results:
-    print(f"{r['model']:10s} {r['backend']:10s} RTF={r['rtf']:.4f}")
+    rtf_median = f"{r['rtf_median']:.6f}" if r['rtf_median'] else "N/A"
+    rtf_mean = f"{r['rtf_mean']:.6f}" if r['rtf_mean'] else "N/A"
+    threads = str(r['threads'])
+    print(f"{r['model']:<10} {r['backend']:<10} {threads:<10} {rtf_median:<12} {rtf_mean:<12}")
+
+# 找出最快的配置
+if results and results[0]["rtf_median"]:
+    best = results[0]
+    print(f"\n🏆 Best configuration:")
+    print(f"   Model: {best['model']}, Backend: {best['backend']}, "
+          f"Threads: {best['threads']}, RTF: {best['rtf_median']:.6f}")
+    print(f"   File: {best['file']}")
+```
+
+**运行分析脚本：**
+
+```bash
+# 生成测试结果后，运行分析
+python analyze_results.py
+```
+
+**输出示例：**
+
+```
+Model      Backend    Threads    RTF(median)  RTF(mean)   
+------------------------------------------------------------
+small      mkldnn     8          0.035234     0.035678    
+small      native     8          0.042156     0.042890    
+base       mkldnn     8          0.028901     0.029234    
+base       native     8          0.035678     0.036123    
+tiny       mkldnn     8          0.018456     0.018789    
+tiny       native     8          0.023456     0.023890    
+
+🏆 Best configuration:
+   Model: tiny, Backend: mkldnn, Threads: 8, RTF: 0.018456
+   File: whisper_bench_model_tiny_backend_mkldnn_t8_audio_test_20260316_143052.json
 ```
 
 ## 贡献与反馈
