@@ -606,16 +606,16 @@ SWEEP_MATRIX = {
         ("native", "avx2",    "auto"),          # 强制 AVX2
         ("native", "avx512",  "auto"),          # 强制 AVX512
         # --- mkldnn 后端 ---
-        ("mkldnn", "auto",   "auto"),           # mkldnn 默认
-        ("mkldnn", "auto",   "avx512_core_vnni"),  # native不限，oneDNN限VNNI
-        ("mkldnn", "avx2",   "avx2"),           # 均限 AVX2
-        ("mkldnn", "avx512", "avx512_core"),    # 均限 AVX512_core
-        ("mkldnn", "avx512", "avx512_core_vnni"),   # VNNI 加速
-        ("mkldnn", "avx512", "avx512_core_bf16"),   # BF16 加速
-        ("mkldnn", "avx512", "avx512_core_amx"),    # AMX 加速
+        ("mkldnn", "default", "auto"),           # mkldnn 默认（native用基础SIMD）
+        ("mkldnn", "default", "avx512_core_vnni"),  # native基础SIMD，oneDNN限VNNI
+        ("mkldnn", "avx2",    "avx2"),           # 均限 AVX2
+        ("mkldnn", "avx512",  "avx512_core"),    # 均限 AVX512_core
+        ("mkldnn", "avx512",  "avx512_core_vnni"),   # VNNI 加速
+        ("mkldnn", "avx512",  "avx512_core_bf16"),   # BF16 加速
+        ("mkldnn", "avx512",  "avx512_core_amx"),    # AMX 加速
     ],
     "threads":          [None, 4, 8],    # None=系统默认
-    "interop_threads":  [None],          # 算子间并行度
+    "interop_threads":  [None, 2, 4],   # 算子间并行度
     "models":           ["small"],       # 可扩展为 ["tiny", "base", "small"]
     "audio_files":      ["zh_long.wav"],
     "decoder_tokens":   [16],            # 可扩展为 [8, 16, 32]
@@ -630,7 +630,7 @@ SWEEP_MATRIX = {
 
 **组合数计算**：`len(backend_isa_combos) × len(threads) × len(interop_threads) × len(models) × len(audio_files) × len(decoder_tokens)`
 
-默认配置：11 ISA组合 × 3 线程 × 1 interop × 1 模型 × 1 音频 × 1 decoder_tokens = **33 组测试**
+默认配置：10 ISA组合 × 3 线程 × 3 interop × 1 模型 × 1 音频 × 1 decoder_tokens = **90 组测试**
 
 #### 扩展示例
 
@@ -641,8 +641,8 @@ SWEEP_MATRIX = {
 # 更多线程数
 "threads": [None, 1, 2, 4, 8, 16],
 
-# 测试 interop 线程影响
-"interop_threads": [None, 2, 4],
+# 扩展 interop 线程测试（默认已包含 None, 2, 4）
+"interop_threads": [None, 1, 2, 4, 8],
 
 # 测试不同 decoder 前缀长度
 "decoder_tokens": [8, 16, 32],
@@ -654,25 +654,25 @@ SWEEP_MATRIX = {
 📋 测试矩阵概览：
   模型       : ['small']
   音频文件   : ['zh_long.wav']
-  后端/ISA组合: 11 种
-             - backend=native   native_isa=auto     onednn_isa=auto
-             - backend=native   native_isa=default   onednn_isa=auto
+  后端/ISA组合: 10 种
+             - backend=native   native_isa=default  onednn_isa=auto
+             - backend=native   native_isa=avx2     onednn_isa=auto
              ...
   线程数     : [None, 4, 8]
-  interop线程: [None]
+  interop线程: [None, 2, 4]
   decoder_tok: [16]
   no_timestamp: False
-  总组合数   : 33
+  总组合数   : 90
 
 ============================================================
-  共 33 个测试组合
+  共 90 个测试组合
   开始时间: 2026-03-19 10:30:00
 ============================================================
 
-[  1/ 33] model=small | backend=native | native_isa=auto | onednn_isa=auto | threads=default | interop=default | dec_tokens=16 | audio=zh_long.wav
+[  1/ 90] model=small | backend=native | native_isa=auto | onednn_isa=auto | threads=default | interop=default | dec_tokens=16 | audio=zh_long.wav
          ✅ 成功  耗时 45.2s
 
-[  2/ 33] ...
+[  2/ 90] ...
 ```
 
 #### 安全特性

@@ -33,13 +33,13 @@ SWEEP_MATRIX = {
         ("native", "avx512",  "auto"),          # 强制 AVX512
 
         # --- mkldnn 后端 ---
-        ("mkldnn", "auto",   "auto"),           # mkldnn 默认
-        ("mkldnn", "auto",   "avx512_core_vnni"),  # native不限，oneDNN限VNNI
-        ("mkldnn", "avx2",   "avx2"),           # 均限 AVX2
-        ("mkldnn", "avx512", "avx512_core"),    # 均限 AVX512_core
-        ("mkldnn", "avx512", "avx512_core_vnni"),   # VNNI 加速
-        ("mkldnn", "avx512", "avx512_core_bf16"),   # BF16 加速
-        ("mkldnn", "avx512", "avx512_core_amx"),    # AMX 加速（Sapphire Rapids）
+        ("mkldnn", "default", "auto"),           # mkldnn 默认（native用基础SIMD）
+        ("mkldnn", "default", "avx512_core_vnni"),  # native基础SIMD，oneDNN限VNNI
+        ("mkldnn", "avx2",    "avx2"),           # 均限 AVX2
+        ("mkldnn", "avx512",  "avx512_core"),    # 均限 AVX512_core
+        ("mkldnn", "avx512",  "avx512_core_vnni"),   # VNNI 加速
+        ("mkldnn", "avx512",  "avx512_core_bf16"),   # BF16 加速
+        ("mkldnn", "avx512",  "avx512_core_amx"),    # AMX 加速（Sapphire Rapids）
     ],
 
     # ── 线程数 ────────────────────────────────
@@ -48,7 +48,7 @@ SWEEP_MATRIX = {
 
     # ── interop 线程数 ────────────────────────
     # 控制算子间并行度；None 表示不指定（系统默认）
-    "interop_threads": [None],
+    "interop_threads": [None, 2, 4],
 
     # ── 模型 ──────────────────────────────────
     "models": ["small"],
