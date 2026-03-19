@@ -34,8 +34,8 @@ def parse_args():
     # 原生 PyTorch CPU ISA
     p.add_argument(
         "--native-isa",
-        default="auto",
-        choices=["auto", "default", "avx2", "avx512"],
+        default="default",
+        choices=["default", "avx2", "avx512"],
         help="限制 PyTorch 原生 ATen CPU capability（ATEN_CPU_CAPABILITY）",
     )
 
@@ -128,9 +128,8 @@ args = parse_args()
 # 必须在 import torch 之前设置
 # ---------------------------
 
-# 原生 PyTorch CPU ISA
-if args.native_isa != "auto":
-    os.environ["ATEN_CPU_CAPABILITY"] = args.native_isa
+# 原生 PyTorch CPU ISA（现在总是设置）
+os.environ["ATEN_CPU_CAPABILITY"] = args.native_isa
 
 # oneDNN ISA
 if args.onednn_isa != "auto":
@@ -631,8 +630,8 @@ def main():
         ]
 
         # 添加 ISA 信息；ATen 和 oneDNN 都可能被显式限制
-        if args.native_isa != "auto":
-            parts.append(f"aten_{args.native_isa}")
+        if args.native_isa != "default":
+            parts.append(f"native_{args.native_isa}")
         if args.onednn_isa != "auto":
             parts.append(f"onednn_{args.onednn_isa}")
 

@@ -88,7 +88,7 @@ python whisper_cpu_bench_allinone.py \
 | 参数 | 默认值 | 选项 | 说明 |
 |------|--------|------|------|
 | `--backend` | `native` | `native`/`mkldnn` | `native`=关闭 MKLDNN（矩阵运算仍会经由 BLAS 如 MKL/OpenBLAS 执行）；`mkldnn`=开启 MKLDNN/oneDNN 加速 |
-| `--native-isa` | `auto` | `auto`/`default`/`avx2`/`avx512` | 限制原生 PyTorch CPU 指令集（`ATEN_CPU_CAPABILITY`） |
+| `--native-isa` | `default` | `default`/`avx2`/`avx512` | 限制原生 PyTorch CPU 指令集（`ATEN_CPU_CAPABILITY`）<br>• `default`：回退到基础 SIMD（SSE/SSE2）<br>• `avx2`/`avx512`：强制使用对应指令集 |
 | `--onednn-isa` | `auto` | `auto`/`avx2`/`avx512_core`/`avx512_core_vnni`/`avx512_core_bf16`/`avx512_core_amx` | 限制 oneDNN 最高指令集 |
 | `--mkldnn-verbose` | `False` | - | 开启 oneDNN verbose（仅在最后一次 warmup 和 profiler 运行时输出，不影响计时精度） |
 | `--mkl-verbose` | `False` | - | 开启 MKL verbose（`MKL_VERBOSE=1`），在 stderr 打印每次 BLAS/GEMM 调用。**注意：全局生效，会影响计时精度，建议仅用于诊断** |
@@ -562,14 +562,132 @@ python whisper_cpu_bench_allinone.py --audio test.wav --backend native \
 
 ## 进阶用法
 
-### 批量测试脚本（自动化）
+### `run_sweep.py` — 批量遍历测试（推荐）
 
-使用 `--json-auto` 简化批量测试，无需手动管理文件名：
+`run_sweep.py` 是一个基于配置矩阵的批量测试编排脚本，自动生成所有参数组合并依次运行 `whisper_cpu_bench_allinone.py`。
+
+#### 快速使用
+
+```bash
+# 预览将执行的所有命令（不实际运行）
+python run_sweep.py --dry-run
+
+# 正式运行（结果默认输出到 ./sweep_results/）
+python run_sweep.py --audio-dir ./audio_files
+
+# 失败时跳过继续
+python run_sweep.py --audio-dir ./audio_files --skip-failed
+```
+
+#### 参数说明
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--audio-dir` | `.` | 音频文件所在目录 |
+| `--json-dir` | `./sweep_results` | JSON 结果输出目录 |
+| `--bench-script` | `whisper_cpu_bench_allinone.py` | benchmark 主脚本路径 |
+| `--python` | 当前 Python | Python 解释器路径 |
+| `--dry-run` | `False` | 只打印命令，不实际运行 |
+| `--sections` | `None` | 覆盖矩阵中的 sections 设置 |
+| `--warmup` | `None` | 覆盖矩阵中的 warmup 设置 |
+| `--repeat` | `None` | 覆盖矩阵中的 repeat 设置 |
+| `--skip-failed` | `False` | 失败时跳过继续，而非中止 |
+
+#### 测试矩阵配置 (`SWEEP_MATRIX`)
+
+直接编辑 `run_sweep.py` 顶部的 `SWEEP_MATRIX` 字典即可自定义测试范围：
+
+```python
+SWEEP_MATRIX = {
+    # 后端/ISA 组合：每组 (backend, native_isa, onednn_isa)
+    "backend_isa_combos": [
+        # --- native 后端 ---
+        ("native", "default", "auto"),          # 原生默认（回退到 SSE 等基础 SIMD）
+        ("native", "avx2",    "auto"),          # 强制 AVX2
+        ("native", "avx512",  "auto"),          # 强制 AVX512
+        # --- mkldnn 后端 ---
+        ("mkldnn", "auto",   "auto"),           # mkldnn 默认
+        ("mkldnn", "auto",   "avx512_core_vnni"),  # native不限，oneDNN限VNNI
+        ("mkldnn", "avx2",   "avx2"),           # 均限 AVX2
+        ("mkldnn", "avx512", "avx512_core"),    # 均限 AVX512_core
+        ("mkldnn", "avx512", "avx512_core_vnni"),   # VNNI 加速
+        ("mkldnn", "avx512", "avx512_core_bf16"),   # BF16 加速
+        ("mkldnn", "avx512", "avx512_core_amx"),    # AMX 加速
+    ],
+    "threads":          [None, 4, 8],    # None=系统默认
+    "interop_threads":  [None],          # 算子间并行度
+    "models":           ["small"],       # 可扩展为 ["tiny", "base", "small"]
+    "audio_files":      ["zh_long.wav"],
+    "decoder_tokens":   [16],            # 可扩展为 [8, 16, 32]
+    "without_timestamps": False,
+    "language": "zh",
+    "task":     "transcribe",
+    "sections": "encoder,decoder,full",
+    "warmup": 3,
+    "repeat": 5,
+}
+```
+
+**组合数计算**：`len(backend_isa_combos) × len(threads) × len(interop_threads) × len(models) × len(audio_files) × len(decoder_tokens)`
+
+默认配置：11 ISA组合 × 3 线程 × 1 interop × 1 模型 × 1 音频 × 1 decoder_tokens = **33 组测试**
+
+#### 扩展示例
+
+```python
+# 多模型对比
+"models": ["tiny", "base", "small", "medium"],
+
+# 更多线程数
+"threads": [None, 1, 2, 4, 8, 16],
+
+# 测试 interop 线程影响
+"interop_threads": [None, 2, 4],
+
+# 测试不同 decoder 前缀长度
+"decoder_tokens": [8, 16, 32],
+```
+
+#### 输出示例
+
+```
+📋 测试矩阵概览：
+  模型       : ['small']
+  音频文件   : ['zh_long.wav']
+  后端/ISA组合: 11 种
+             - backend=native   native_isa=auto     onednn_isa=auto
+             - backend=native   native_isa=default   onednn_isa=auto
+             ...
+  线程数     : [None, 4, 8]
+  interop线程: [None]
+  decoder_tok: [16]
+  no_timestamp: False
+  总组合数   : 33
+
+============================================================
+  共 33 个测试组合
+  开始时间: 2026-03-19 10:30:00
+============================================================
+
+[  1/ 33] model=small | backend=native | native_isa=auto | onednn_isa=auto | threads=default | interop=default | dec_tokens=16 | audio=zh_long.wav
+         ✅ 成功  耗时 45.2s
+
+[  2/ 33] ...
+```
+
+#### 安全特性
+
+- **音频文件预检查**：启动前验证所有音频文件存在
+- **ISA 配置警告**：`native` 后端下设置 `onednn_isa` 时自动提示不生效
+- **超时保护**：单个测试超过 1 小时自动中止
+- **异常捕获**：subprocess 异常不会导致整个 sweep 崩溃
+
+### 简单批量测试（Shell 循环）
+
+如果只需简单的循环测试，也可以直接用 shell 脚本：
 
 ```bash
 #!/bin/bash
-# 测试所有模型 + 后端组合，自动生成有意义的文件名
-
 AUDIO="test.wav"
 MODELS="tiny base small"
 BACKENDS="native mkldnn"
@@ -588,15 +706,11 @@ for model in $MODELS; do
       --json-dir $OUTPUT_DIR
   done
 done
-
-echo "All results saved to: $OUTPUT_DIR"
-ls -lh $OUTPUT_DIR
 ```
 
 **Windows PowerShell 版本：**
 
 ```powershell
-# 批量测试脚本
 $audio = "test.wav"
 $models = @("tiny", "base", "small")
 $backends = @("native", "mkldnn")
@@ -615,9 +729,6 @@ foreach ($model in $models) {
             --json-dir $outputDir
     }
 }
-
-Write-Host "All results saved to: $outputDir"
-Get-ChildItem $outputDir | Format-Table Name, Length
 ```
 
 ### 结果分析脚本
