@@ -28,7 +28,7 @@ def parse_args():
         "--backend",
         default="native",
         choices=["native", "mkldnn"],
-        help="native=关闭mkldnn走原生路径；mkldnn=开启mkldnn",
+        help="native=关闭mkldnn；矩阵运算仍会经由BLAS(MKL/OpenBLAS等)执行；mkldnn=开启mkldnn",
     )
 
     # 原生 PyTorch CPU ISA
@@ -57,7 +57,13 @@ def parse_args():
     p.add_argument(
         "--mkldnn-verbose",
         action="store_true",
-        help="开启 oneDNN verbose",
+        help="开启 oneDNN verbose（ONEDNN_VERBOSE=1）",
+    )
+    p.add_argument(
+        "--mkl-verbose",
+        action="store_true",
+        help="开启 MKL verbose（MKL_VERBOSE=1），在 stderr 打印每次 BLAS/GEMM 调用。"
+             "注意：全局生效，会影响计时精度，建议仅用于诊断而非正式计时",
     )
 
     # 线程
@@ -132,6 +138,15 @@ if args.onednn_isa != "auto":
     os.environ["ONEDNN_MAX_CPU_ISA"] = isa
     # 兼容部分环境的旧变量名
     os.environ["DNNL_MAX_CPU_ISA"] = isa
+
+# MKL verbose（必须在 import torch 之前设置）
+if args.mkl_verbose:
+    os.environ["MKL_VERBOSE"] = "1"
+# 注意：oneDNN verbose 不在这里通过环境变量设置，
+# 因为 ONEDNN_VERBOSE=1 会全局生效，导致所有 warmup/timing 迭代
+# 都输出 verbose 信息（大量 I/O），污染计时结果。
+# 改用 torch.backends.mkldnn.verbose() context manager，
+# 仅在最后一次 warmup 和 profiler 运行时精确开启。
 
 # 线程环境变量
 if args.threads is not None:
@@ -271,6 +286,50 @@ def time_fn(fn, warmup, repeat):
     return times, last
 
 
+# op 名称包含以下关键字时可确定走了 oneDNN 路径；
+# 其余算子是否经由 MKL/OpenBLAS 或纯 SIMD 无法仅凭 op 名区分，
+# 统一归入 native/BLAS 并展示实际 top-N 算子。
+_ONEDNN_KEYWORDS = ("mkldnn", "onednn", "dnnl")
+
+_TOPK_PER_GROUP = 8  # 每个分组内展示的 top-N 算子数
+
+
+def _classify_op(key_name: str) -> str:
+    lo = key_name.lower()
+    if any(kw in lo for kw in _ONEDNN_KEYWORDS):
+        return "oneDNN"
+    return "native/BLAS"
+
+
+def _backend_breakdown(events) -> str:
+    """Dynamically group events by inferred backend, show per-group top ops."""
+    groups: dict[str, list] = {"oneDNN": [], "native/BLAS": []}
+    for evt in events:
+        groups[_classify_op(evt.key)].append(evt)
+
+    grand = sum(e.self_cpu_time_total for e in events)
+    if grand == 0.0:
+        return "  (no events)"
+
+    lines = []
+    for backend in ("oneDNN", "native/BLAS"):
+        evts = groups[backend]
+        t = sum(e.self_cpu_time_total for e in evts)
+        pct = 100.0 * t / grand
+        lines.append(
+            f"  {backend:<22}: {t/1000:>9.3f} ms  ({pct:5.1f}%)  [{len(evts)} op type(s)]"
+        )
+        note = ("  * op 名含 mkldnn/onednn/dnnl" if backend == "oneDNN"
+                else "  * 可能含 MKL/OpenBLAS/SIMD，无法从 op 名进一步区分")
+        lines.append(note)
+        top = sorted(evts, key=lambda e: e.self_cpu_time_total, reverse=True)[:_TOPK_PER_GROUP]
+        for e in top:
+            ep = 100.0 * e.self_cpu_time_total / grand
+            lines.append(f"    {e.key:<40}: {e.self_cpu_time_total/1000:>8.3f} ms  ({ep:5.1f}%)")
+    lines.append(f"  {'total (self_cpu)':<22}: {grand/1000:>9.3f} ms")
+    return "\n".join(lines)
+
+
 def run_profile_once(section_name, fn):
     activities = [ProfilerActivity.CPU]
 
@@ -296,6 +355,8 @@ def run_profile_once(section_name, fn):
 
     print(f"\n[profiler::{section_name}]")
     print(table)
+    print(f"\n[profiler::{section_name}::backend_breakdown]")
+    print(_backend_breakdown(events))
 
     txt_dir = maybe_mkdir(args.profile_txt_dir)
     if txt_dir is not None:
@@ -385,10 +446,12 @@ def main():
     print(f"ATEN_CPU_CAPABILITY   : {os.environ.get('ATEN_CPU_CAPABILITY', '<unset>')}")
     print(f"mkldnn available      : {torch.backends.mkldnn.is_available()}")
     print(f"mkldnn enabled        : {torch.backends.mkldnn.enabled}")
+    print(f"mkl available         : {torch.backends.mkl.is_available()}")
+    print(f"mkl verbose           : {args.mkl_verbose}  (MKL_VERBOSE={os.environ.get('MKL_VERBOSE', '<unset>')})")
+    print(f"mkldnn verbose        : {args.mkldnn_verbose}")
     print(f"onednn isa requested  : {args.onednn_isa}")
     print(f"ONEDNN_MAX_CPU_ISA    : {os.environ.get('ONEDNN_MAX_CPU_ISA', '<unset>')}")
     print(f"DNNL_MAX_CPU_ISA      : {os.environ.get('DNNL_MAX_CPU_ISA', '<unset>')}")
-    print(f"mkldnn verbose        : {args.mkldnn_verbose}")
     print(f"cpu capability        : {torch.backends.cpu.get_cpu_capability()}")
     print(f"torch num threads     : {torch.get_num_threads()}")
     print(f"torch interop threads : {torch.get_num_interop_threads()}")
@@ -421,6 +484,8 @@ def main():
             "env_ATEN_CPU_CAPABILITY": os.environ.get("ATEN_CPU_CAPABILITY"),
             "mkldnn_available": bool(torch.backends.mkldnn.is_available()),
             "mkldnn_enabled": bool(torch.backends.mkldnn.enabled),
+            "mkl_available": bool(torch.backends.mkl.is_available()),
+            "mkl_verbose": args.mkl_verbose,
             "onednn_isa_requested": args.onednn_isa,
             "env_ONEDNN_MAX_CPU_ISA": os.environ.get("ONEDNN_MAX_CPU_ISA"),
             "env_DNNL_MAX_CPU_ISA": os.environ.get("DNNL_MAX_CPU_ISA"),

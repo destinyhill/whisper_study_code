@@ -9,6 +9,8 @@
 - ✅ **分段性能测试**：可单独测试 encoder、decoder 或完整转录流程
 - ✅ **详细性能统计**：均值、中位数、P90/P95、标准差等指标
 - ✅ **PyTorch Profiler 集成**：深入分析性能瓶颈
+- ✅ **算子后端分析**：自动分组统计 oneDNN 与 native/BLAS 算子耗时，动态展示 top-N 算子
+- ✅ **BLAS 库诊断**：支持 MKL/oneDNN verbose 输出，精确追踪底层库调用
 - ✅ **智能结果导出**：自动生成包含配置信息的 JSON 文件名，批量测试更便捷
 - ✅ **批量测试友好**：适合大规模性能对比和自动化测试
 
@@ -85,10 +87,11 @@ python whisper_cpu_bench_allinone.py \
 
 | 参数 | 默认值 | 选项 | 说明 |
 |------|--------|------|------|
-| `--backend` | `native` | `native`/`mkldnn` | `native`=关闭 MKLDNN；`mkldnn`=开启 MKLDNN/oneDNN 加速 |
+| `--backend` | `native` | `native`/`mkldnn` | `native`=关闭 MKLDNN（矩阵运算仍会经由 BLAS 如 MKL/OpenBLAS 执行）；`mkldnn`=开启 MKLDNN/oneDNN 加速 |
 | `--native-isa` | `auto` | `auto`/`default`/`avx2`/`avx512` | 限制原生 PyTorch CPU 指令集（`ATEN_CPU_CAPABILITY`） |
 | `--onednn-isa` | `auto` | `auto`/`avx2`/`avx512_core`/`avx512_core_vnni`/`avx512_core_bf16`/`avx512_core_amx` | 限制 oneDNN 最高指令集 |
-| `--mkldnn-verbose` | `False` | - | 开启 oneDNN 详细日志（调试用） |
+| `--mkldnn-verbose` | `False` | - | 开启 oneDNN verbose（仅在最后一次 warmup 和 profiler 运行时输出，不影响计时精度） |
+| `--mkl-verbose` | `False` | - | 开启 MKL verbose（`MKL_VERBOSE=1`），在 stderr 打印每次 BLAS/GEMM 调用。**注意：全局生效，会影响计时精度，建议仅用于诊断** |
 
 **ISA 选择建议：**
 - **Intel 10th Gen+ (Ice Lake/Cascade Lake)**：`avx512_core_vnni`
@@ -215,20 +218,44 @@ python whisper_cpu_bench_allinone.py \
 ### 示例 5：深度性能分析
 
 ```bash
-# 开启 profiler，输出详细表格和 Chrome trace
+# 开启 profiler，输出详细表格、算子后端分组统计和 Chrome trace
 python whisper_cpu_bench_allinone.py \
   --audio test.wav \
   --model small \
   --backend mkldnn \
-  --sections full \
-  --profile-sections full \
+  --sections encoder \
+  --profile-sections encoder \
   --profile-topk 50 \
   --profile-record-shapes \
   --profile-memory \
   --profile-txt-dir ./profiler_tables \
   --profile-trace-dir ./profiler_traces
 
-# 然后在 Chrome 浏览器打开 chrome://tracing，加载 ./profiler_traces/full_transcribe.json
+# 输出会自动包含：
+# 1. PyTorch Profiler 标准表格（按 self CPU time 排序）
+# 2. 算子后端分组统计（oneDNN vs native/BLAS，动态展示 top-8 算子）
+# 3. Chrome trace JSON（用 chrome://tracing 查看时间线）
+
+# 如果需要诊断 BLAS 库调用，可开启 verbose（注意：会显着降低性能）
+python whisper_cpu_bench_allinone.py \
+  --audio test.wav \
+  --model small \
+  --backend mkldnn \
+  --sections encoder \
+  --mkldnn-verbose \
+  --warmup 1 \
+  --repeat 1
+  # 最后一次 warmup 会打印 oneDNN verbose 日志到 stderr
+
+# 诊断 MKL BLAS 调用（慎用，全局生效会严重影响计时）
+python whisper_cpu_bench_allinone.py \
+  --audio test.wav \
+  --model small \
+  --backend native \
+  --sections encoder \
+  --mkl-verbose \
+  --warmup 0 \
+  --repeat 1 2>/dev/null  # 重定向 stderr 避免刷屏
 ```
 
 ### 示例 6：多语言支持
@@ -330,6 +357,28 @@ torch num threads     : 8
 [full_transcribe]
   ...
   text_preview        : 这是一段测试音频的转录结果...
+
+# 如果开启了 --profile-sections，还会输出 Profiler 详细分析：
+[profiler::encoder_30s_chunk]
+---------------------------------  ------------  ... (PyTorch Profiler 标准表格)
+Name                               Self CPU %   ...
+---------------------------------  ------------  ...
+aten::addmm                        25.34%       ...
+aten::conv2d                       18.72%       ...
+...
+
+[profiler::encoder_30s_chunk::backend_breakdown]  # 新增：算子后端分组统计
+  oneDNN                :   312.450 ms  ( 78.3%)  [14 op type(s)]
+  * op 名含 mkldnn/onednn/dnnl
+    aten::mkldnn_convolution            :   210.123 ms  ( 52.7%)
+    aten::mkldnn_linear                 :    65.340 ms  ( 16.4%)
+    ...
+  native/BLAS           :    86.350 ms  ( 21.7%)  [32 op type(s)]
+  * 可能含 MKL/OpenBLAS/SIMD，无法从 op 名进一步区分
+    aten::addmm                         :    45.120 ms  ( 11.3%)
+    aten::gelu                          :    18.230 ms  (  4.6%)
+    ...
+  total (self_cpu)      :   398.800 ms
 ```
 
 ### JSON 输出
@@ -469,6 +518,47 @@ Whisper 内部使用 FFmpeg，支持常见格式：
 ### Q5：为什么 encoder 固定测试 30 秒？
 
 Whisper 的设计是将音频切分为 30 秒 chunks 分别处理，因此 encoder benchmark 统一使用 30 秒切片以保证对比公平性。
+
+### Q6：如何解读 Profiler 的 backend_breakdown？
+
+**输出示例：**
+```
+[profiler::encoder_30s_chunk::backend_breakdown]
+  oneDNN                :   312.450 ms  ( 78.3%)  [14 op type(s)]
+  * op 名含 mkldnn/onednn/dnnl
+    aten::mkldnn_convolution            :   210.123 ms  ( 52.7%)
+    aten::mkldnn_linear                 :    65.340 ms  ( 16.4%)
+    ...
+  native/BLAS           :    86.350 ms  ( 21.7%)  [32 op type(s)]
+  * 可能含 MKL/OpenBLAS/SIMD，无法从 op 名进一步区分
+    aten::addmm                         :    45.120 ms  ( 11.3%)
+    aten::gelu                          :    18.230 ms  (  4.6%)
+    ...
+  total (self_cpu)      :   398.800 ms
+```
+
+**解读：**
+- **oneDNN 分组**：op 名包含 `mkldnn`/`onednn`/`dnnl` 的算子，确定走了 oneDNN 优化路径
+- **native/BLAS 分组**：其余算子。其中：
+  - `aten::addmm`/`aten::mm`/`aten::linear` 等 GEMM 算子在 native 模式下会走 MKL/OpenBLAS
+  - `aten::gelu`/`aten::add` 等逐元素算子走 ATen 原生 SIMD 实现
+  - 无法仅凭 op 名进一步区分，需结合 `--mkl-verbose` 确认
+- **动态 top-N**：每组内按耗时降序展示实际出现的前 8 个算子，无需硬编码
+
+**对比建议：**
+```bash
+# 1. 先对比 mkldnn vs native 的整体耗时
+python whisper_cpu_bench_allinone.py --audio test.wav --backend native --profile-sections encoder
+python whisper_cpu_bench_allinone.py --audio test.wav --backend mkldnn --profile-sections encoder
+
+# 2. 观察 backend_breakdown：
+#    - native 模式：native/BLAS 分组占比高，查看 aten::addmm 等 GEMM 算子耗时
+#    - mkldnn 模式：oneDNN 分组占比高，查看 aten::mkldnn_* 算子耗时
+
+# 3. 如需确认 MKL 调用情况，使用 --mkl-verbose（但会严重影响计时）：
+python whisper_cpu_bench_allinone.py --audio test.wav --backend native \
+  --sections encoder --mkl-verbose --warmup 0 --repeat 1 2>mkl_output.log
+```
 
 ## 进阶用法
 
